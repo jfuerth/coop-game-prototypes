@@ -182,6 +182,7 @@ class Game {
         this.fpsCounter = 0;
         this.fpsTimer = 0;
         this.levelEditor = null;
+        this.currentLevelName = null;
         
         this.init().catch(console.error);
     }
@@ -208,12 +209,17 @@ class Game {
         this.player = new Catfox(this.app.renderer,100, 100);
         this.app.stage.addChild(this.player);
 
-        this.createPlatforms();
         this.createGround();
         
         // Initialize level editor
         this.levelEditor = new LevelEditor(this);
         await this.levelEditor.setupEditor();
+        
+        // Setup level management UI
+        this.setupLevelManagement();
+        
+        // Load initial level
+        await this.loadInitialLevel();
         
         // Start game loop
         this.app.ticker.add(this.gameLoop.bind(this));
@@ -295,29 +301,7 @@ class Game {
         this.currentGamepadButtons = currentButtons;
     }
 
-    createPlatforms() {
-        // Create various platforms and trampolines
-        
-        // Trampolines with different bounce forces
-        const trampoline1 = new Trampoline(200, 450, -18);
-        const trampoline2 = new Trampoline(400, 350, -25); // Higher bounce
-        const trampoline3 = new Trampoline(600, 400, -15); // Lower bounce
-        
-        // Solid platforms
-        const platform1 = new SolidPlatform(150, 300, 100, 15);
-        const platform2 = new SolidPlatform(500, 250, 150, 15);
-        const platform3 = new SolidPlatform(300, 200, 80, 15);
-        
-        // Initialize textures and add to platforms array
-        this.platforms = [trampoline1, trampoline2, trampoline3, platform1, platform2, platform3];
-        
-        this.platforms.forEach(platform => {
-            platform.initTexture(this.app.renderer);
-            this.app.stage.addChild(platform);
-        });
-        
-        console.log(`Created ${this.platforms.length} platforms`);
-    }
+
     
     // Method to add a new platform at runtime
     addPlatform(platform) {
@@ -453,6 +437,16 @@ class Game {
             this.levelEditor.toggle();
         }
         
+        // Clear all platforms control  
+        const clearPressed = (this.keys['KeyC'] && !this.lastKeys['KeyC']) ||
+                            this.getGamepadButtonPressed(11); // Right stick click
+        
+        if (clearPressed) {
+            if (confirm('Clear all platforms from the current level?')) {
+                this.clearAllPlatforms();
+            }
+        }
+        
         // Store current key states for next frame
         this.lastKeys = { ...this.keys };
         this.lastGamepadButtons = { ...this.currentGamepadButtons };
@@ -560,6 +554,278 @@ class Game {
         this.handleInput();
         this.updatePhysics();
         this.updateFPS(dt);
+    }
+    
+    // Level Save/Load System
+    saveLevel(levelName) {
+        const levelData = {
+            name: levelName,
+            platforms: this.platforms.map(platform => {
+                const bounds = platform.getBounds();
+                return {
+                    type: platform.constructor.name,
+                    x: platform.x,
+                    y: platform.y,
+                    width: platform.platformWidth || bounds.width,
+                    height: platform.platformHeight || bounds.height,
+                    bounceForce: platform.bounceForce || null,
+                    collected: platform.collected || false
+                };
+            }),
+            playerStart: this.playerStartPos
+        };
+        
+        try {
+            const savedLevels = this.getSavedLevels();
+            savedLevels[levelName] = levelData;
+            localStorage.setItem('trampolineLevels', JSON.stringify(savedLevels));
+            this.currentLevelName = levelName;
+            this.updateLevelDropdown();
+            this.setLastUsedLevel(levelName);
+            console.log(`Level "${levelName}" saved successfully!`);
+            return true;
+        } catch (error) {
+            console.error('Failed to save level:', error);
+            return false;
+        }
+    }
+    
+    loadLevel(levelName) {
+        try {
+            const savedLevels = this.getSavedLevels();
+            const levelData = savedLevels[levelName];
+            
+            if (!levelData) {
+                console.warn(`Level "${levelName}" not found`);
+                return false;
+            }
+            
+            // Clear existing platforms
+            this.clearAllPlatforms();
+            
+            // Recreate platforms from saved data
+            levelData.platforms.forEach(platformData => {
+                let platform;
+                
+                switch (platformData.type) {
+                    case 'SolidPlatform':
+                        platform = new SolidPlatform(
+                            platformData.x, 
+                            platformData.y, 
+                            platformData.width || 120, 
+                            platformData.height || 20
+                        );
+                        break;
+                    case 'Trampoline':
+                        platform = new Trampoline(
+                            platformData.x, 
+                            platformData.y, 
+                            platformData.bounceForce || -20
+                        );
+                        break;
+                    case 'Star':
+                        platform = new Star(platformData.x, platformData.y);
+                        if (platformData.collected) {
+                            platform.collected = true;
+                            platform.alpha = 0.5;
+                        }
+                        break;
+                    case 'PlayerStart':
+                        platform = new PlayerStart(platformData.x, platformData.y);
+                        break;
+                    default:
+                        console.warn(`Unknown platform type: ${platformData.type}`);
+                        return;
+                }
+                
+                this.addPlatform(platform);
+            });
+            
+            // Update player start position
+            if (levelData.playerStart) {
+                this.playerStartPos = levelData.playerStart;
+            }
+            
+            this.currentLevelName = levelName;
+            this.updateLevelDropdown();
+            this.setLastUsedLevel(levelName);
+            console.log(`Level "${levelName}" loaded successfully!`);
+            return true;
+        } catch (error) {
+            console.error('Failed to load level:', error);
+            return false;
+        }
+    }
+    
+    getSavedLevels() {
+        try {
+            const saved = localStorage.getItem('trampolineLevels');
+            return saved ? JSON.parse(saved) : {};
+        } catch (error) {
+            console.error('Failed to get saved levels:', error);
+            return {};
+        }
+    }
+    
+    deletLevel(levelName) {
+        try {
+            const savedLevels = this.getSavedLevels();
+            if (savedLevels[levelName]) {
+                delete savedLevels[levelName];
+                localStorage.setItem('trampolineLevels', JSON.stringify(savedLevels));
+                console.log(`Level "${levelName}" deleted successfully!`);
+                return true;
+            } else {
+                console.warn(`Level "${levelName}" not found`);
+                return false;
+            }
+        } catch (error) {
+            console.error('Failed to delete level:', error);
+            return false;
+        }
+    }
+    
+    clearAllPlatforms() {
+        // Remove all platforms from stage and clear array
+        this.platforms.forEach(platform => {
+            this.app.stage.removeChild(platform);
+        });
+        this.platforms = [];
+    }
+    
+    listSavedLevels() {
+        const savedLevels = this.getSavedLevels();
+        return Object.keys(savedLevels);
+    }
+    
+    setupLevelManagement() {
+        const levelSelect = document.getElementById('levelSelect');
+        const loadBtn = document.getElementById('loadBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const saveAsBtn = document.getElementById('saveAsBtn');
+        
+        // Populate level dropdown
+        this.updateLevelDropdown();
+        
+        // Button event listeners
+        loadBtn.addEventListener('click', () => {
+            const selectedLevel = levelSelect.value;
+            if (selectedLevel) {
+                this.loadLevel(selectedLevel);
+            }
+        });
+        
+        saveBtn.addEventListener('click', () => {
+            if (this.currentLevelName) {
+                this.saveLevel(this.currentLevelName);
+            } else {
+                this.saveAsNewLevel();
+            }
+        });
+        
+        saveAsBtn.addEventListener('click', () => {
+            this.saveAsNewLevel();
+        });
+        
+        // Dropdown change listener
+        levelSelect.addEventListener('change', () => {
+            // Auto-load when selection changes (optional)
+            // You can comment this out if you prefer manual loading
+            const selectedLevel = levelSelect.value;
+            if (selectedLevel && selectedLevel !== this.currentLevelName) {
+                this.loadLevel(selectedLevel);
+            }
+        });
+    }
+    
+    updateLevelDropdown() {
+        const levelSelect = document.getElementById('levelSelect');
+        const savedLevels = this.listSavedLevels();
+        
+        // Clear existing options except the first one
+        levelSelect.innerHTML = '<option value="">Select a level...</option>';
+        
+        // Add saved levels
+        savedLevels.forEach(levelName => {
+            const option = document.createElement('option');
+            option.value = levelName;
+            option.textContent = levelName;
+            if (levelName === this.currentLevelName) {
+                option.selected = true;
+            }
+            levelSelect.appendChild(option);
+        });
+    }
+    
+    saveAsNewLevel() {
+        const levelName = prompt('Enter new level name:');
+        if (levelName && levelName.trim()) {
+            const trimmedName = levelName.trim();
+            this.saveLevel(trimmedName);
+            this.currentLevelName = trimmedName;
+            this.updateLevelDropdown();
+            this.setLastUsedLevel(trimmedName);
+        }
+    }
+    
+    async loadInitialLevel() {
+        const savedLevels = this.listSavedLevels();
+        
+        if (savedLevels.length === 0) {
+            // No saved levels, create and load demo level
+            this.createDemoLevel();
+            this.saveLevel('Demo');
+            this.currentLevelName = 'Demo';
+            this.setLastUsedLevel('Demo');
+        } else {
+            // Load last used level or first available level
+            const lastUsed = this.getLastUsedLevel();
+            const levelToLoad = lastUsed && savedLevels.includes(lastUsed) ? lastUsed : savedLevels[0];
+            this.loadLevel(levelToLoad);
+        }
+        
+        this.updateLevelDropdown();
+    }
+    
+    createDemoLevel() {
+        // Create the original demo platforms
+        const trampoline1 = new Trampoline(200, 450, -18);
+        const trampoline2 = new Trampoline(400, 350, -25);
+        const trampoline3 = new Trampoline(600, 400, -15);
+        
+        const platform1 = new SolidPlatform(150, 300, 100, 15);
+        const platform2 = new SolidPlatform(500, 250, 150, 15);
+        const platform3 = new SolidPlatform(300, 200, 80, 15);
+        
+        // Add a few stars for goals
+        const star1 = new Star(300, 170);
+        const star2 = new Star(500, 220);
+        
+        this.platforms = [trampoline1, trampoline2, trampoline3, platform1, platform2, platform3, star1, star2];
+        
+        this.platforms.forEach(platform => {
+            platform.initTexture(this.app.renderer);
+            this.app.stage.addChild(platform);
+        });
+        
+        console.log('Created demo level');
+    }
+    
+    getLastUsedLevel() {
+        try {
+            return localStorage.getItem('trampolineLastLevel');
+        } catch (error) {
+            console.error('Failed to get last used level:', error);
+            return null;
+        }
+    }
+    
+    setLastUsedLevel(levelName) {
+        try {
+            localStorage.setItem('trampolineLastLevel', levelName);
+        } catch (error) {
+            console.error('Failed to set last used level:', error);
+        }
     }
 }
 
@@ -742,7 +1008,7 @@ class LevelEditor {
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
         
-        // No restrictions now - can place anywhere on the game canvas
+        // Handle different tool actions
         if (this.selectedTool === 'erase') {
             this.eraseAtPosition(x, y);
         } else {

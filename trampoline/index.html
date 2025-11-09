@@ -24,6 +24,58 @@
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
         }
         
+        #levelManager {
+            position: absolute;
+            top: -50px;
+            left: 0;
+            right: 0;
+            height: 40px;
+            background: #333;
+            border: 2px solid #444;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 15px;
+            font-family: Arial, sans-serif;
+        }
+        
+        #levelManager label {
+            color: #ccc;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        #levelSelect {
+            flex: 1;
+            max-width: 200px;
+            padding: 5px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #222;
+            color: #fff;
+            font-size: 12px;
+        }
+        
+        #levelManager button {
+            padding: 5px 12px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #444;
+            color: #fff;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.2s;
+        }
+        
+        #levelManager button:hover {
+            background: #555;
+        }
+        
+        #levelManager button:active {
+            background: #333;
+        }
+        
         #paletteContainer {
             width: 140px;
             background-color: #333;
@@ -67,6 +119,15 @@
 </head>
 <body>
     <div id="gameContainer">
+        <div id="levelManager">
+            <label for="levelSelect">Level:</label>
+            <select id="levelSelect">
+                <option value="">Select a level...</option>
+            </select>
+            <button id="loadBtn">Load</button>
+            <button id="saveBtn">Save</button>
+            <button id="saveAsBtn">Save As...</button>
+        </div>
         <div id="paletteContainer"></div>
         <div id="gameArea">
             <div id="info">
@@ -77,9 +138,9 @@
         </div>
         <div class="controls">
             <strong>Keyboard:</strong> Arrow keys or WASD to move • Space to jump • E = Toggle Editor<br>
-            T = Add trampoline • P = Add platform • R = Remove last platform<br>
+            T = Add trampoline • P = Add platform • R = Remove last platform • C = Clear all<br>
             <strong>Gamepad:</strong> Left stick/D-pad to move • A/B/D-pad up to jump • Select = Toggle Editor<br>
-            X = Add trampoline • Y = Add platform • Bumpers = Remove platform<br>
+            X = Add trampoline • Y = Add platform • Bumpers = Remove platform • Right stick = Clear<br>
             <strong>Level Editor:</strong> Click palette tools then click on game area to paint objects
         </div>
     </div>
