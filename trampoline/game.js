@@ -1,6 +1,43 @@
 // Trampoline Game Prototype
 // Game mechanics prototyping with Pixi.js
 
+class Catfox extends PIXI.Sprite {
+  constructor(renderer, x, y, type = 'solid') {
+        // Create a simple player sprite (colored rectangle)
+        const graphics = new PIXI.Graphics();
+        graphics.beginFill(0xFF6B6B); // Red color
+        graphics.drawRect(0, 0, 40, 40);
+        graphics.endFill();
+
+        super(renderer.generateTexture(graphics));
+        this.x = 100;
+        this.y = 100;
+        this.anchor.set(0.5);
+        
+        // physics properties
+        this.vx = 0; // Velocity X
+        this.vy = 0; // Velocity Y
+        this.onGround = false;
+        this.speed = 5;
+    }
+
+    isStandingOn(target) {
+        const playerBounds = this.getBounds();
+        return playerBounds.x < target.x + target.width &&
+               playerBounds.x + playerBounds.width > target.x &&
+               playerBounds.y + playerBounds.height < target.y + target.height &&
+               playerBounds.y + playerBounds.height > target.y;
+    }
+
+    isIntersecting(target) {
+        const playerBounds = this.getBounds();
+        return playerBounds.x < target.x + target.width &&
+               playerBounds.x + playerBounds.width > target.x &&
+               playerBounds.y < target.y + target.height &&
+               playerBounds.y + playerBounds.height > target.y;
+    }
+}
+
 // Platform base class
 class Platform extends PIXI.Sprite {
     constructor(x, y, type = 'solid') {
@@ -16,25 +53,11 @@ class Platform extends PIXI.Sprite {
         this._graphics = null; // Will store graphics for texture generation
     }
     
-    onPlayerCollision(player) {
-        // Override in subclasses for specific behavior
-        if (this.platformType === 'trampoline') {
-            player.vy = this.bounceForce;
-            player.y = this.getBounds().y - player.height / 2;
-            this.playBounceAnimation();
-        } else {
-            // Solid platform - stop falling
-            player.vy = 0;
-            player.y = this.getBounds().y - player.height / 2;
-            player.onGround = true;
+    initTexture(renderer) {
+        if (this._graphics) {
+            this.texture = renderer.generateTexture(this._graphics);
+            this._graphics = null; // Clean up graphics object
         }
-    }
-    
-    playBounceAnimation() {
-        this.scale.set(1.2, 0.8);
-        setTimeout(() => {
-            this.scale.set(this.originalScale.x, this.originalScale.y);
-        }, 100);
     }
 }
 
@@ -51,12 +74,18 @@ class Trampoline extends Platform {
         graphics.endFill();
         this._graphics = graphics;
     }
-    
-    initTexture(renderer) {
-        if (this._graphics) {
-            this.texture = renderer.generateTexture(this._graphics);
-            this._graphics = null; // Clean up graphics object
-        }
+
+    onPlayerCollision(player) {
+        player.vy = this.bounceForce;
+        player.y = this.getBounds().y - player.height / 2;
+        this.playBounceAnimation();
+    }
+
+    playBounceAnimation() {
+        this.scale.set(1.2, 0.8);
+        setTimeout(() => {
+            this.scale.set(this.originalScale.x, this.originalScale.y);
+        }, 100);
     }
 }
 
@@ -74,13 +103,13 @@ class SolidPlatform extends Platform {
         graphics.endFill();
         this._graphics = graphics;
     }
-    
-    initTexture(renderer) {
-        if (this._graphics) {
-            this.texture = renderer.generateTexture(this._graphics);
-            this._graphics = null; // Clean up graphics object
-        }
-    }
+
+    onPlayerCollision(player) {
+        // Solid platform - stop falling
+        player.vy = 0;
+        player.y = this.getBounds().y - player.height / 2;
+        player.onGround = true;
+    }    
 }
 
 // Star (goal) class
@@ -102,13 +131,6 @@ class Star extends Platform {
         graphics.endFill();
         this._graphics = graphics;
         this.collected = false;
-    }
-    
-    initTexture(renderer) {
-        if (this._graphics) {
-            this.texture = renderer.generateTexture(this._graphics);
-            this._graphics = null;
-        }
     }
     
     onPlayerCollision(player) {
@@ -134,13 +156,6 @@ class PlayerStart extends Platform {
         graphics.drawCircle(15, 15, 8);
         graphics.endFill();
         this._graphics = graphics;
-    }
-    
-    initTexture(renderer) {
-        if (this._graphics) {
-            this.texture = renderer.generateTexture(this._graphics);
-            this._graphics = null;
-        }
     }
     
     onPlayerCollision(player) {
@@ -190,7 +205,9 @@ class Game {
         this.setupInput();
         
         // Create game objects
-        this.createPlayer();
+        this.player = new Catfox(this.app.renderer,100, 100);
+        this.app.stage.addChild(this.player);
+
         this.createPlatforms();
         this.createGround();
         
@@ -277,28 +294,7 @@ class Game {
         // Handle gamepad input in handleInput method
         this.currentGamepadButtons = currentButtons;
     }
-    
-    createPlayer() {
-        // Create a simple player sprite (colored rectangle)
-        const graphics = new PIXI.Graphics();
-        graphics.beginFill(0xFF6B6B); // Red color
-        graphics.drawRect(0, 0, 40, 40);
-        graphics.endFill();
-        
-        this.player = new PIXI.Sprite(this.app.renderer.generateTexture(graphics));
-        this.player.x = 100;
-        this.player.y = 100;
-        this.player.anchor.set(0.5);
-        
-        // Player physics properties
-        this.player.vx = 0; // Velocity X
-        this.player.vy = 0; // Velocity Y
-        this.player.onGround = false;
-        this.player.speed = 5;
-        
-        this.app.stage.addChild(this.player);
-    }
-    
+
     createPlatforms() {
         // Create various platforms and trampolines
         
@@ -495,32 +491,26 @@ class Game {
         
         // Reset if player falls off screen
         if (this.player.y > this.app.screen.height + 100) {
-            this.resetPlayer();
+            this.resetGame();
         }
     }
     
     checkPlatformCollisions() {
-        const playerBounds = this.player.getBounds();
-        
         // Check collision with each platform
         for (let platform of this.platforms) {
             const platformBounds = platform.getBounds();
             
-            // AABB collision detection
-            if (playerBounds.x < platformBounds.x + platformBounds.width &&
-                playerBounds.x + playerBounds.width > platformBounds.x &&
-                playerBounds.y < platformBounds.y + platformBounds.height &&
-                playerBounds.y + playerBounds.height > platformBounds.y) {
-                
-                // Special handling for different platform types
-                if (platform.platformType === 'star') {
-                    // Stars are always collected on contact
+            // Special handling for different platform types
+            if (platform.platformType === 'star') {
+                if (this.player.isIntersecting(platformBounds)) {
                     platform.onPlayerCollision(this.player);
-                } else if (platform.platformType === 'playerStart') {
-                    // Player start positions don't affect physics
-                    continue;
-                } else if (this.player.vy > 0) {
-                    // Only interact with solid platforms/trampolines when falling
+                }
+            } else if (platform.platformType === 'playerStart') {
+                // Player start positions don't affect physics
+                continue;
+            } else if (this.player.vy > 0) {
+                // Only interact with solid platforms/trampolines when falling
+                if (this.player.isStandingOn(platformBounds)) {
                     platform.onPlayerCollision(this.player);
                     break; // Break after first solid collision
                 }
@@ -528,7 +518,7 @@ class Game {
         }
     }
     
-    resetPlayer() {
+    resetGame() {
         // Find player start position or use default
         const startPos = this.platforms.find(p => p.platformType === 'playerStart');
         if (startPos) {
@@ -806,3 +796,4 @@ class LevelEditor {
         console.log(`Level editor ${this.isEnabled ? 'enabled' : 'disabled'}`);
     }
 }
+
