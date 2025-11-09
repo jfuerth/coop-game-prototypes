@@ -92,6 +92,9 @@ class Game {
         this.jumpForce = -15;
         this.keys = {};
         this.lastKeys = {}; // For detecting one-time key presses
+        this.gamepad = null;
+        this.lastGamepadButtons = {};
+        this.gamepadDeadzone = 0.3; // Threshold for analog stick movement
         this.lastTime = 0;
         this.fpsCounter = 0;
         this.fpsTimer = 0;
@@ -137,6 +140,69 @@ class Game {
         window.addEventListener('keyup', (e) => {
             this.keys[e.code] = false;
         });
+        
+        // Gamepad event listeners
+        window.addEventListener('gamepadconnected', (e) => {
+            console.log(`Gamepad connected: ${e.gamepad.id}`);
+            this.gamepad = e.gamepad;
+            this.updateGamepadStatus();
+        });
+        
+        window.addEventListener('gamepaddisconnected', (e) => {
+            console.log(`Gamepad disconnected: ${e.gamepad.id}`);
+            if (this.gamepad && this.gamepad.index === e.gamepad.index) {
+                this.gamepad = null;
+                this.updateGamepadStatus();
+            }
+        });
+        
+        // Check for already connected gamepads
+        this.checkForGamepads();
+    }
+    
+    updateGamepadStatus() {
+        const statusElement = document.getElementById('gamepadStatus');
+        if (this.gamepad) {
+            // Truncate gamepad name if too long
+            let name = this.gamepad.id;
+            if (name.length > 30) {
+                name = name.substring(0, 27) + '...';
+            }
+            statusElement.textContent = `Gamepad: ${name}`;
+        } else {
+            statusElement.textContent = 'Gamepad: Not connected';
+        }
+    }
+    
+    checkForGamepads() {
+        const gamepads = navigator.getGamepads();
+        for (let i = 0; i < gamepads.length; i++) {
+            if (gamepads[i]) {
+                this.gamepad = gamepads[i];
+                console.log(`Found existing gamepad: ${this.gamepad.id}`);
+                this.updateGamepadStatus();
+                break;
+            }
+        }
+    }
+    
+    updateGamepadInput() {
+        if (!this.gamepad) return;
+        
+        // Get the latest gamepad state
+        const gamepads = navigator.getGamepads();
+        this.gamepad = gamepads[this.gamepad.index];
+        
+        if (!this.gamepad) return;
+        
+        // Store current button states for edge detection
+        const currentButtons = {};
+        for (let i = 0; i < this.gamepad.buttons.length; i++) {
+            currentButtons[i] = this.gamepad.buttons[i].pressed;
+        }
+        
+        // Handle gamepad input in handleInput method
+        this.currentGamepadButtons = currentButtons;
     }
     
     createPlayer() {
@@ -225,17 +291,25 @@ class Game {
     }
     
     handleInput() {
+        // Update gamepad state
+        this.updateGamepadInput();
+        
+        // Get input states from both keyboard and gamepad
+        const moveLeft = this.keys['KeyA'] || this.keys['ArrowLeft'] || this.getGamepadAxisLeft();
+        const moveRight = this.keys['KeyD'] || this.keys['ArrowRight'] || this.getGamepadAxisRight();
+        const jump = (this.keys['KeyW'] || this.keys['ArrowUp'] || this.keys['Space'] || this.getGamepadJump()) && this.player.onGround;
+        
         // Horizontal movement
-        if (this.keys['KeyA'] || this.keys['ArrowLeft']) {
+        if (moveLeft) {
             this.player.vx = -this.player.speed;
-        } else if (this.keys['KeyD'] || this.keys['ArrowRight']) {
+        } else if (moveRight) {
             this.player.vx = this.player.speed;
         } else {
             this.player.vx *= 0.8; // Friction
         }
         
         // Jump
-        if ((this.keys['KeyW'] || this.keys['ArrowUp'] || this.keys['Space']) && this.player.onGround) {
+        if (jump) {
             this.player.vy = this.jumpForce;
             this.player.onGround = false;
         }
@@ -244,9 +318,40 @@ class Game {
         this.handlePlatformControls();
     }
     
+    getGamepadAxisLeft() {
+        if (!this.gamepad) return false;
+        const leftStickX = this.gamepad.axes[0];
+        const dpadLeft = this.gamepad.buttons[14]?.pressed;
+        return leftStickX < -this.gamepadDeadzone || dpadLeft;
+    }
+    
+    getGamepadAxisRight() {
+        if (!this.gamepad) return false;
+        const leftStickX = this.gamepad.axes[0];
+        const dpadRight = this.gamepad.buttons[15]?.pressed;
+        return leftStickX > this.gamepadDeadzone || dpadRight;
+    }
+    
+    getGamepadJump() {
+        if (!this.gamepad) return false;
+        // A button (0), B button (1), or dpad up (12)
+        return this.gamepad.buttons[0]?.pressed || 
+               this.gamepad.buttons[1]?.pressed || 
+               this.gamepad.buttons[12]?.pressed;
+    }
+    
     handlePlatformControls() {
+        // Get gamepad button states for one-time presses
+        const addTrampolinePressed = (this.keys['KeyT'] && !this.lastKeys['KeyT']) || 
+                                   this.getGamepadButtonPressed(2); // X button
+        const addPlatformPressed = (this.keys['KeyP'] && !this.lastKeys['KeyP']) || 
+                                 this.getGamepadButtonPressed(3); // Y button
+        const removePlatformPressed = (this.keys['KeyR'] && !this.lastKeys['KeyR']) || 
+                                    this.getGamepadButtonPressed(4) || // Left bumper
+                                    this.getGamepadButtonPressed(5);   // Right bumper
+        
         // Add trampoline at random position
-        if (this.keys['KeyT'] && !this.lastKeys['KeyT']) {
+        if (addTrampolinePressed) {
             const x = Utils.random(100, this.app.screen.width - 100);
             const y = Utils.random(150, this.app.screen.height - 150);
             const bounceForce = Utils.random(-15, -30);
@@ -255,7 +360,7 @@ class Game {
         }
         
         // Add solid platform at random position
-        if (this.keys['KeyP'] && !this.lastKeys['KeyP']) {
+        if (addPlatformPressed) {
             const x = Utils.random(100, this.app.screen.width - 100);
             const y = Utils.random(150, this.app.screen.height - 150);
             const width = Utils.random(80, 150);
@@ -264,7 +369,7 @@ class Game {
         }
         
         // Remove last added platform
-        if (this.keys['KeyR'] && !this.lastKeys['KeyR']) {
+        if (removePlatformPressed) {
             if (this.platforms.length > 0) {
                 const removed = this.removePlatform(this.platforms.length - 1);
                 console.log(`Removed platform: ${removed?.platformType}`);
@@ -273,6 +378,12 @@ class Game {
         
         // Store current key states for next frame
         this.lastKeys = { ...this.keys };
+        this.lastGamepadButtons = { ...this.currentGamepadButtons };
+    }
+    
+    getGamepadButtonPressed(buttonIndex) {
+        if (!this.gamepad || !this.currentGamepadButtons) return false;
+        return this.currentGamepadButtons[buttonIndex] && !this.lastGamepadButtons[buttonIndex];
     }
     
     updatePhysics() {
