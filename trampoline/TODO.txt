@@ -1,0 +1,1 @@
+* encapsulate all the gamepad control mapping and keyboard control mapping each into their own functions or classes that expose the logical controls (player movement, platform add/delete commands)

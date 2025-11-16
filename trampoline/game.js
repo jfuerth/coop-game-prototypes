@@ -48,9 +48,9 @@ class Platform extends PIXI.Sprite {
         this.y = y;
         this.anchor.set(0.5);
         this.platformType = type;
-        this.bounceForce = -15; // Default bounce force
         this.originalScale = { x: 1, y: 1 };
         this._graphics = null; // Will store graphics for texture generation
+        this.wantsRemoval = false;
     }
     
     initTexture(renderer) {
@@ -63,10 +63,10 @@ class Platform extends PIXI.Sprite {
 
 // Trampoline class
 class Trampoline extends Platform {
-    constructor(x, y, bounceForce = -20) {
+    constructor(x, y, bounceForce = -20, ttl = -1) {
         super(x, y, 'trampoline');
         this.bounceForce = bounceForce;
-        
+        this.ttl = ttl;
         // Create graphics for this trampoline
         const graphics = new PIXI.Graphics();
         graphics.beginFill(0x4ECDC4); // Teal color
@@ -79,6 +79,10 @@ class Trampoline extends Platform {
         player.vy = this.bounceForce;
         player.y = this.getBounds().y - player.height / 2;
         this.playBounceAnimation();
+        this.ttl--;
+        if (this.ttl === 0) {
+            this.wantsRemoval = true;
+        }
     }
 
     playBounceAnimation() {
@@ -171,8 +175,8 @@ class Game {
         this.platforms = []; // Array to hold all platforms
         this.stars = []; // Array to hold star objects
         this.playerStartPos = { x: 100, y: 100 }; // Default start position
-        this.gravity = 0.8;
-        this.jumpForce = -15;
+        this.gravity = 0.4;
+        this.jumpForce = -10;
         this.keys = {};
         this.lastKeys = {}; // For detecting one-time key presses
         this.gamepad = null;
@@ -395,38 +399,16 @@ class Game {
     
     handlePlatformControls() {
         // Get gamepad button states for one-time presses
-        const addTrampolinePressed = (this.keys['KeyT'] && !this.lastKeys['KeyT']) || 
-                                   this.getGamepadButtonPressed(2); // X button
-        const addPlatformPressed = (this.keys['KeyP'] && !this.lastKeys['KeyP']) || 
-                                 this.getGamepadButtonPressed(3); // Y button
-        const removePlatformPressed = (this.keys['KeyR'] && !this.lastKeys['KeyR']) || 
-                                    this.getGamepadButtonPressed(4) || // Left bumper
-                                    this.getGamepadButtonPressed(5);   // Right bumper
+        const addTrampolinePressed = this.keys['KeyT'] && !this.lastKeys['KeyT']
         
         // Add trampoline at random position
         if (addTrampolinePressed) {
-            const x = Utils.random(100, this.app.screen.width - 100);
-            const y = Utils.random(150, this.app.screen.height - 150);
-            const bounceForce = Utils.random(-15, -30);
-            this.addPlatform(new Trampoline(x, y, bounceForce));
+            const x = this.player.x + this.player.vx * 10;
+            const y = this.player.y + this.player.height * 2;
+            const bounceForce = -15;
+            const maxBounces = 1;
+            this.addPlatform(new Trampoline(x, y, bounceForce, maxBounces));
             console.log(`Added trampoline at (${Math.round(x)}, ${Math.round(y)}) with bounce force ${bounceForce}`);
-        }
-        
-        // Add solid platform at random position
-        if (addPlatformPressed) {
-            const x = Utils.random(100, this.app.screen.width - 100);
-            const y = Utils.random(150, this.app.screen.height - 150);
-            const width = Utils.random(80, 150);
-            this.addPlatform(new SolidPlatform(x, y, width, 15));
-            console.log(`Added solid platform at (${Math.round(x)}, ${Math.round(y)}) with width ${Math.round(width)}`);
-        }
-        
-        // Remove last added platform
-        if (removePlatformPressed) {
-            if (this.platforms.length > 0) {
-                const removed = this.removePlatform(this.platforms.length - 1);
-                console.log(`Removed platform: ${removed?.platformType}`);
-            }
         }
         
         // Toggle level editor
@@ -437,16 +419,13 @@ class Game {
             this.levelEditor.toggle();
         }
         
-        // Clear all platforms control  
-        const clearPressed = (this.keys['KeyC'] && !this.lastKeys['KeyC']) ||
-                            this.getGamepadButtonPressed(11); // Right stick click
-        
-        if (clearPressed) {
-            if (confirm('Clear all platforms from the current level?')) {
-                this.clearAllPlatforms();
-            }
+        // Reset player to start position
+        const resetPressed = this.keys['KeyR'] && !this.lastKeys['KeyR']
+
+        if (resetPressed) {
+            this.resetGame();
         }
-        
+
         // Store current key states for next frame
         this.lastKeys = { ...this.keys };
         this.lastGamepadButtons = { ...this.currentGamepadButtons };
@@ -467,7 +446,8 @@ class Game {
         
         // Platform collisions
         this.checkPlatformCollisions();
-        
+        this.checkPlatformRemovals();
+
         // Ground collision
         const groundY = this.app.screen.height - 100 - this.player.height / 2;
         if (this.player.y >= groundY) {
@@ -511,9 +491,19 @@ class Game {
             }
         }
     }
+
+    checkPlatformRemovals() {
+        // Remove platforms that want to be removed
+        for (let i = this.platforms.length - 1; i >= 0; i--) {
+            const platform = this.platforms[i];
+            if (platform.wantsRemoval) {
+                this.removePlatformByRef(platform);
+            }
+        }
+    }
     
     resetGame() {
-        // Find player start position or use default
+        // Find player start position or use stored position
         const startPos = this.platforms.find(p => p.platformType === 'playerStart');
         if (startPos) {
             this.player.x = startPos.x;
@@ -641,10 +631,20 @@ class Game {
                 this.addPlatform(platform);
             });
             
-            // Update player start position
-            if (levelData.playerStart) {
+            // Update player start position from PlayerStart platform or saved data
+            const playerStartPlatform = this.platforms.find(p => p.platformType === 'playerStart');
+            if (playerStartPlatform) {
+                this.playerStartPos = { x: playerStartPlatform.x, y: playerStartPlatform.y };
+            } else if (levelData.playerStart) {
                 this.playerStartPos = levelData.playerStart;
             }
+            
+            // Move player to start position
+            this.player.x = this.playerStartPos.x;
+            this.player.y = this.playerStartPos.y;
+            this.player.vx = 0;
+            this.player.vy = 0;
+            this.player.onGround = false;
             
             this.currentLevelName = levelName;
             this.updateLevelDropdown();
@@ -801,12 +801,18 @@ class Game {
         const star1 = new Star(300, 170);
         const star2 = new Star(500, 220);
         
-        this.platforms = [trampoline1, trampoline2, trampoline3, platform1, platform2, platform3, star1, star2];
+        // Add player start position
+        const playerStart = new PlayerStart(100, 450);
+        
+        this.platforms = [trampoline1, trampoline2, trampoline3, platform1, platform2, platform3, star1, star2, playerStart];
         
         this.platforms.forEach(platform => {
             platform.initTexture(this.app.renderer);
             this.app.stage.addChild(platform);
         });
+        
+        // Update player start position
+        this.playerStartPos = { x: 100, y: 450 };
         
         console.log('Created demo level');
     }
@@ -1035,6 +1041,8 @@ class LevelEditor {
                 return true;
             });
             newObject = new tool.class(x, y);
+            // Update the game's player start position
+            this.game.playerStartPos = { x: x, y: y };
         } else {
             newObject = new tool.class(x, y);
         }
