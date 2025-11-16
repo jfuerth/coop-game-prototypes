@@ -168,6 +168,41 @@ class PlayerStart extends Platform {
     }
 }
 
+// Death Platform class
+class DeathPlatform extends Platform {
+    constructor(x, y, width = 120, height = 20) {
+        super(x, y, 'death');
+        this.platformWidth = width;
+        this.platformHeight = height;
+        
+        // Create graphics for this platform - spiky red platform
+        const graphics = new PIXI.Graphics();
+        graphics.beginFill(0xFF0000); // Red color
+        graphics.drawRect(0, 0, width, height);
+        graphics.endFill();
+        
+        // Add spikes on top
+        graphics.beginFill(0xAA0000); // Darker red for spikes
+        for (let i = 0; i < width; i += 10) {
+            graphics.drawPolygon([
+                i, 0,
+                i + 5, -8,
+                i + 10, 0
+            ]);
+        }
+        graphics.endFill();
+        this._graphics = graphics;
+    }
+    
+    onPlayerCollision(player) {
+        // Death platform - reset player to start position
+        console.log('Player hit death platform - resetting!');
+        // Trigger reset through the game instance
+        // We'll need to pass the game reference or trigger reset differently
+        this.triggerReset = true;
+    }
+}
+
 class Game {
     constructor() {
         this.app = null;
@@ -479,6 +514,16 @@ class Game {
                 if (this.player.isIntersecting(platformBounds)) {
                     platform.onPlayerCollision(this.player);
                 }
+            } else if (platform.platformType === 'death') {
+                // Death platforms trigger on any contact
+                if (this.player.isIntersecting(platformBounds)) {
+                    platform.onPlayerCollision(this.player);
+                    // Check if platform wants to trigger reset
+                    if (platform.triggerReset) {
+                        this.resetGame();
+                        platform.triggerReset = false; // Reset the flag
+                    }
+                }
             } else if (platform.platformType === 'playerStart') {
                 // Player start positions don't affect physics
                 continue;
@@ -622,6 +667,14 @@ class Game {
                         break;
                     case 'PlayerStart':
                         platform = new PlayerStart(platformData.x, platformData.y);
+                        break;
+                    case 'DeathPlatform':
+                        platform = new DeathPlatform(
+                            platformData.x, 
+                            platformData.y, 
+                            platformData.width || 120, 
+                            platformData.height || 20
+                        );
                         break;
                     default:
                         console.warn(`Unknown platform type: ${platformData.type}`);
@@ -880,7 +933,8 @@ class LevelEditor {
             'trampoline': { name: 'Trampoline', color: 0x4ECDC4, class: Trampoline },
             'star': { name: 'Star', color: 0xFFD700, class: Star },
             'playerStart': { name: 'Start', color: 0x00FF00, class: PlayerStart },
-            'erase': { name: 'Erase', color: 0xFF0000, class: null }
+            'death': { name: 'Death', color: 0xFF0000, class: DeathPlatform },
+            'erase': { name: 'Erase', color: 0x800000, class: null }
         };
         // setupEditor will be called async from Game.init()
     }
@@ -957,6 +1011,18 @@ class LevelEditor {
                 icon.drawPolygon(points);
             } else if (toolKey === 'playerStart') {
                 icon.drawCircle(20, 20, 8);
+            } else if (toolKey === 'death') {
+                // Draw spiky platform for death tool
+                icon.drawRoundedRect(10, 15, 20, 10, 2);
+                icon.endFill();
+                icon.beginFill(0xAA0000); // Darker red for spikes
+                for (let i = 10; i < 30; i += 4) {
+                    icon.drawPolygon([
+                        i, 15,
+                        i + 2, 10,
+                        i + 4, 15
+                    ]);
+                }
             } else {
                 icon.drawRoundedRect(10, 15, 20, 10, 2);
             }
@@ -1031,6 +1097,8 @@ class LevelEditor {
             newObject = new tool.class(x, y, 100, 15);
         } else if (toolType === 'trampoline') {
             newObject = new tool.class(x, y, -20);
+        } else if (toolType === 'death') {
+            newObject = new tool.class(x, y, 100, 15);
         } else if (toolType === 'playerStart') {
             // Remove existing player start positions
             this.game.platforms = this.game.platforms.filter(platform => {
